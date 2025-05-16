@@ -1,0 +1,81 @@
+const fetch = require('node-fetch')
+const fs = require('fs')
+const path = require('path')
+
+const GITHUB_TOKEN = global.githubtoken // Token GitHub kamu
+const REPO_OWNER = "rizalmhmd" // Username GitHub kamu
+const REPO_NAME = "BOTWA" // Nama repository
+const BRANCH = "master" // Nama branch
+
+async function uploadToGitHub(destinationPath, filePath, isText = false) {
+ try {
+ const fileContent = isText
+ ? Buffer.from(filePath).toString('base64') // isinya langsung string text
+ : fs.readFileSync(filePath, { encoding: 'base64' }) // kalau file biasa
+
+ const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${destinationPath}`
+ const payload = {
+ message: `Upload ${destinationPath}`,
+ content: fileContent,
+ branch: BRANCH
+ }
+
+ const response = await fetch(url, {
+ method: 'PUT',
+ headers: {
+ Authorization: `Bearer ${GITHUB_TOKEN}`,
+ 'Content-Type': 'application/json',
+ },
+ body: JSON.stringify(payload),
+ })
+
+ const data = await response.json()
+
+ if (response.ok) {
+ return `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${destinationPath}`
+ } else {
+ throw new Error(data.message || 'Gagal upload ke GitHub.')
+ }
+ } catch (error) {
+ throw new Error(`Error upload file: ${error.message}`)
+ }
+}
+
+exports.run = {
+ usage: ['upgh'],
+ use: 'reply file atau kirim teks',
+ category: 'owner',
+ async: async (m, { mecha, quoted }) => {
+ if ((!quoted || !quoted.mime) && !m.text) {
+ return m.reply(`Kirim teks atau reply file apa pun dengan caption ${m.cmd}`)
+ }
+
+ m.reply(global.mess.wait)
+
+ try {
+ let filePath, destinationPath, isText = false
+
+ if (quoted && quoted.mime) {
+ // Kalau reply file
+ filePath = await mecha.downloadAndSaveMediaMessage(m)
+ const extension = quoted.mime.split('/')[1] || 'file'
+ destinationPath = `uploads/${Date.now()}_${m.sender.split('@')[0]}.${extension}`
+ } else {
+ // Kalau kirim teks biasa
+ isText = true
+ const extension = 'txt'
+ filePath = m.text
+ destinationPath = `uploads/${Date.now()}_${m.sender.split('@')[0]}.${extension}`
+ }
+
+ const fileUrl = await uploadToGitHub(destinationPath, filePath, isText)
+
+ await mecha.reply(m.chat, `✅ File berhasil diunggah:\n${fileUrl}`, m)
+
+ if (!isText) fs.unlinkSync(filePath)
+ } catch (e) {
+ m.reply(`❌ Error: ${e.message}`)
+ }
+ },
+ owner: true
+}
