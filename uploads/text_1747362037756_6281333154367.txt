@@ -1,0 +1,87 @@
+const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
+
+const GITHUB_TOKEN = global.githubtoken;
+const REPO_OWNER = "rizalmhmd";
+const REPO_NAME = "BOTWA";
+const BRANCH = "master";
+
+async function uploadToGitHub(destinationPath, filePath) {
+    try {
+        const fileContent = fs.readFileSync(filePath, { encoding: 'base64' });
+
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${destinationPath}`;
+        const payload = {
+            message: `Add ${destinationPath}`,
+            content: fileContent,
+            branch: BRANCH,
+        };
+
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                Authorization: `Bearer ${GITHUB_TOKEN}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            return `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${destinationPath}`;
+        } else {
+            throw new Error(data.message || 'Gagal mengunggah file ke GitHub.');
+        }
+    } catch (error) {
+        throw new Error(`Error mengunggah file: ${error.message}`);
+    }
+}
+
+exports.run = {
+    usage: ['upgh'],
+    use: 'reply file / kirim teks (dengan extensi opsional)',
+    category: 'owner',
+    async: async (m, { mecha, quoted, text, command }) => {
+        m.reply(global.mess.wait);
+        try {
+            let mediaPath, destinationPath;
+
+            if (quoted && quoted.mime) {
+                // Upload file biasa
+                mediaPath = await mecha.downloadAndSaveMediaMessage(m);
+                const extension = quoted.mime.split('/')[1] || 'file';
+                destinationPath = `uploads/${Date.now()}_${m.sender.split('@')[0]}.${extension}`;
+            } else if (m.text || quoted?.text) {
+                // Upload teks, bisa dengan ekstensi custom
+                const inputText = m.text || quoted.text;
+                let ext = 'txt';
+                let filename = `text_${Date.now()}_${m.sender.split('@')[0]}`;
+
+                // Kalau user pakai format: ext|filename
+                if (text?.includes('|')) {
+                    let [givenExt, givenName] = text.split('|').map(x => x.trim());
+                    if (givenExt) ext = givenExt.toLowerCase();
+                    if (givenName) filename = givenName.replace(/\s+/g, '_');
+                }
+
+                const fullName = `${filename}.${ext}`;
+                const tempPath = path.join(__dirname, fullName);
+                fs.writeFileSync(tempPath, inputText);
+
+                mediaPath = tempPath;
+                destinationPath = `uploads/${fullName}`;
+            } else {
+                return m.reply(`Kirim/reply file *atau* teks (dengan format optional: .${command} java|MyClass)`);
+            }
+
+            const fileUrl = await uploadToGitHub(destinationPath, mediaPath);
+            await mecha.reply(m.chat, `✅ File berhasil diunggah:\n${fileUrl}`, m);
+
+            fs.unlinkSync(mediaPath);
+        } catch (e) {
+            return m.reply(`❌ Error: ${String(e)}`);
+        }
+    },
+    owner: true
+};
